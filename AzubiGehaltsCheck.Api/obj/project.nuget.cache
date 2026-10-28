@@ -1,0 +1,24 @@
+{
+  "version": 2,
+  "dgSpecHash": "jFxOTSkZCN8=",
+  "success": true,
+  "projectFilePath": "D:\\codes\\AzubiGehaltsCheck\\AzubiGehaltsCheck.Api\\AzubiGehaltsCheck.Api.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\beahe\\.nuget\\packages\\microsoft.aspnetcore.openapi\\10.0.3\\microsoft.aspnetcore.openapi.10.0.3.nupkg.sha512",
+    "C:\\Users\\beahe\\.nuget\\packages\\microsoft.openapi\\2.0.0\\microsoft.openapi.2.0.0.nupkg.sha512"
+  ],
+  "logs": [
+    {
+      "code": "NU1903",
+      "level": "Warning",
+      "message": "Das Paket \"Microsoft.OpenApi\" 2.0.0 weist eine bekannte Hoch Schweregrad-Sicherheitsanfälligkeit auf, https://github.com/advisories/GHSA-v5pm-xwqc-g5wc.",
+      "projectPath": "D:\\codes\\AzubiGehaltsCheck\\AzubiGehaltsCheck.Api\\AzubiGehaltsCheck.Api.csproj",
+      "warningLevel": 1,
+      "filePath": "D:\\codes\\AzubiGehaltsCheck\\AzubiGehaltsCheck.Api\\AzubiGehaltsCheck.Api.csproj",
+      "libraryId": "Microsoft.OpenApi",
+      "targetGraphs": [
+        "net10.0"
+      ]
+    }
+  ]
+}
