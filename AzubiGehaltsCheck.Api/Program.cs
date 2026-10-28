@@ -4,12 +4,21 @@ var builder = WebApplication.CreateBuilder(args);
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
 
+builder.AddServiceDefaults();
+builder.Services.AddControllers();
+
+// Swagger
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
+    app.UseSwagger();
+    app.UseSwaggerUI();
 }
 
 app.UseHttpsRedirection();
@@ -32,6 +41,11 @@ app.MapGet("/weatherforecast", () =>
     return forecast;
 })
 .WithName("GetWeatherForecast");
+
+app.MapDefaultEndpoints();
+
+// API endpoints
+app.MapControllers();
 
 app.Run();
 
