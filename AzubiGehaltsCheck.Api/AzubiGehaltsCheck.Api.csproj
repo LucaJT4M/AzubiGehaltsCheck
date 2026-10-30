@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AzubiGehaltsCheck.ServiceDefaults\AzubiGehaltsCheck.ServiceDefaults.csproj" />
+    <ProjectReference Include="..\AzubiGehaltsCheck.Infrastructure\AzubiGehaltsCheck.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,6 +1,8 @@
 <Solution>
   <Project Path="AzubiGehaltsCheck.Api/AzubiGehaltsCheck.Api.csproj" />
   <Project Path="AzubiGehaltsCheck.AppHost/AzubiGehaltsCheck.AppHost.csproj" />
+  <Project Path="AzubiGehaltsCheck.Domain/AzubiGehaltsCheck.Domain.csproj" />
+  <Project Path="AzubiGehaltsCheck.Infrastructure/AzubiGehaltsCheck.Infrastructure.csproj" />
   <Project Path="AzubiGehaltsCheck.ServiceDefaults/AzubiGehaltsCheck.ServiceDefaults.csproj" />
   <Project Path="AzubiGehaltsCheck.Tests/AzubiGehaltsCheck.Tests.csproj" />
 </Solution>
