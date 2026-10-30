@@ -1,3 +1,5 @@
+using AzubiGehaltsCheck.Entities.Leistung;
+
 namespace AzubiGehaltsCheck.Domain.Entities;
 
 /// Eine Bedingung einer Leistung, z. B. "Alter KleinerAls 25".

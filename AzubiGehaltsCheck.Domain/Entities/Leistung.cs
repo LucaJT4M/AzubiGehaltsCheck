@@ -1,3 +1,5 @@
+using AzubiGehaltsCheck.Domain.Entities;
+
 namespace AzubiGehaltsCheck.Entities.Leistung;
 
 public class Leistung
