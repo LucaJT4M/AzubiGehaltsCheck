@@ -1,5 +1,7 @@
 using AzubiGehaltsCheck.Infrastructure;
+using AzubiGehaltsCheck.Infrastructure.Data;
 using AzubiGehaltsCheck.Infrastructure.Identity;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -14,11 +16,23 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-// Register database and Identity
+// Infrastructure (PostgreSQL + Identity)
 builder.Services.AddInfrastructure(builder.Configuration);
 
 var app = builder.Build();
 
+// this makes sure the db migrates automatically so you dont have to do it manual every time you update
+if (app.Environment.IsDevelopment())
+{
+    using var scope = app.Services.CreateScope();
+
+    var db = scope.ServiceProvider
+        .GetRequiredService<ApplicationDbContext>();
+
+    await db.Database.MigrateAsync();
+}
+
+// Aspire health endpoints
 app.MapDefaultEndpoints();
 
 // Configure the HTTP request pipeline.

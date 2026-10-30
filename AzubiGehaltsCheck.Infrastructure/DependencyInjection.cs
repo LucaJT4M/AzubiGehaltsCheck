@@ -11,17 +11,20 @@ namespace AzubiGehaltsCheck.Infrastructure
     {
         public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
         {
+            // PostgreSQL
             services.AddDbContext<ApplicationDbContext>(options =>
             {
                 options.UseNpgsql(
                     configuration.GetConnectionString("appdb"));
             });
 
+            // Identity
             services
                 .AddIdentityApiEndpoints<ApplicationUser>()
                 .AddRoles<IdentityRole>()
                 .AddEntityFrameworkStores<ApplicationDbContext>();
 
+            // Authorization
             services.AddAuthorization();
 
             return services;
