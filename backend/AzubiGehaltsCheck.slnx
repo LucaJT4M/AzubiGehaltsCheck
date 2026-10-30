@@ -1,4 +1,0 @@
-<Solution>
-  <Project Path="AzubiGehaltsCheck.Api/AzubiGehaltsCheck.Api.csproj" />
-  <Project Path="AzubiGehaltsCheck.Tests/AzubiGehaltsCheck.Tests.csproj" />
-</Solution>
