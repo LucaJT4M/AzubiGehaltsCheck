@@ -1,6 +1,6 @@
 using AzubiGehaltsCheck.Infrastructure;
 using AzubiGehaltsCheck.Infrastructure.Data;
-using AzubiGehaltsCheck.Infrastructure.Identity;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -34,6 +34,7 @@ if (app.Environment.IsDevelopment())
 
 // Aspire health endpoints
 app.MapDefaultEndpoints();
+await EnsureRolesAsync(app.Services);
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
@@ -46,9 +47,30 @@ if (app.Environment.IsDevelopment())
 app.UseAuthentication();
 app.UseAuthorization();
 
-app.MapGroup("/auth")
-    .MapIdentityApi<ApplicationUser>();
+// app.MapGroup("/auth")
+// .MapIdentityApi<ApplicationUser>();
 
 app.MapControllers();
 
 app.Run();
+
+static async Task EnsureRolesAsync(IServiceProvider services)
+{
+    using var scope = services.CreateScope();
+    var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
+
+    var roles = new[] { "User", "Admin" };
+
+    foreach (var role in roles)
+    {
+        if (!await roleManager.RoleExistsAsync(role))
+        {
+            var result = await roleManager.CreateAsync(new IdentityRole(role));
+            if (!result.Succeeded)
+            {
+                throw new InvalidOperationException(
+                    $"Failed to create role '{role}': {string.Join(", ", result.Errors.Select(e => e.Description))}");
+            }
+        }
+    }
+}
