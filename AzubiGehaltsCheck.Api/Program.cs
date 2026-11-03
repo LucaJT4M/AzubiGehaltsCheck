@@ -2,6 +2,7 @@ using AzubiGehaltsCheck.Infrastructure;
 using AzubiGehaltsCheck.Infrastructure.Data;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.OpenApi;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -14,7 +15,31 @@ builder.Services.AddControllers();
 
 // Swagger
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(static options =>
+{
+    options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Name = "Authorization",
+        Type = SecuritySchemeType.Http,
+        Scheme = "bearer",
+        BearerFormat = "JWT",
+        In = ParameterLocation.Header,
+        Description = "Paste only the JWT token"
+    });
+
+    options.AddSecurityRequirement(static document =>
+    {
+        var bearerReference = new OpenApiSecuritySchemeReference(
+            referenceId: "Bearer",
+            hostDocument: document,
+            externalResource: null);
+
+        return new OpenApiSecurityRequirement
+        {
+            { bearerReference, new List<string>() }
+        };
+    });
+});
 
 // Infrastructure (PostgreSQL + Identity)
 builder.Services.AddInfrastructure(builder.Configuration);
@@ -69,7 +94,7 @@ static async Task EnsureRolesAsync(IServiceProvider services)
             if (!result.Succeeded)
             {
                 throw new InvalidOperationException(
-                    $"Failed to create role '{role}': {string.Join(", ", result.Errors.Select(e => e.Description))}");
+                    $"Failed to create role '{role}': {string.Join(", ", result.Errors.Select(static e => e.Description))}");
             }
         }
     }
