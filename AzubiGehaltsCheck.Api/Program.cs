@@ -1,8 +1,10 @@
 using System.Security.Claims;
 using AzubiGehaltsCheck.Infrastructure;
 using AzubiGehaltsCheck.Infrastructure.Data;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
 
 // config for the secret auth key stored in user secrets (when local dev)
