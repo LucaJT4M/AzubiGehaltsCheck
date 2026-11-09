@@ -1,10 +1,9 @@
 using System.Security.Claims;
 using AzubiGehaltsCheck.Infrastructure;
 using AzubiGehaltsCheck.Infrastructure.Data;
-using AzubiGehaltsCheck.Infrastructure.Identity;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi;
 
 // config for the secret auth key stored in user secrets (when local dev)
 var builder = WebApplication.CreateBuilder(args);
@@ -47,7 +46,31 @@ builder.Services.AddControllers();
 
 // Swagger
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(static options =>
+{
+    options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Name = "Authorization",
+        Type = SecuritySchemeType.Http,
+        Scheme = "bearer",
+        BearerFormat = "JWT",
+        In = ParameterLocation.Header,
+        Description = "Paste only the JWT token"
+    });
+
+    options.AddSecurityRequirement(static document =>
+    {
+        var bearerReference = new OpenApiSecuritySchemeReference(
+            referenceId: "Bearer",
+            hostDocument: document,
+            externalResource: null);
+
+        return new OpenApiSecurityRequirement
+        {
+            { bearerReference, new List<string>() }
+        };
+    });
+});
 
 // Infrastructure (PostgreSQL + Identity)
 builder.Services.AddInfrastructure(builder.Configuration);
@@ -67,6 +90,7 @@ if (app.Environment.IsDevelopment())
 
 // Aspire health endpoints
 app.MapDefaultEndpoints();
+await EnsureRolesAsync(app.Services);
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
@@ -80,8 +104,29 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 // app.MapGroup("/auth")
-//     .MapIdentityApi<ApplicationUser>();
+// .MapIdentityApi<ApplicationUser>();
 
 app.MapControllers();
 
 app.Run();
+
+static async Task EnsureRolesAsync(IServiceProvider services)
+{
+    using var scope = services.CreateScope();
+    var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
+
+    var roles = new[] { "User", "Admin" };
+
+    foreach (var role in roles)
+    {
+        if (!await roleManager.RoleExistsAsync(role))
+        {
+            var result = await roleManager.CreateAsync(new IdentityRole(role));
+            if (!result.Succeeded)
+            {
+                throw new InvalidOperationException(
+                    $"Failed to create role '{role}': {string.Join(", ", result.Errors.Select(static e => e.Description))}");
+            }
+        }
+    }
+}

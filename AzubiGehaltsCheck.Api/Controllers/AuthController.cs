@@ -1,109 +1,278 @@
-using System.ComponentModel.DataAnnotations;
-using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
+using AzubiGehaltsCheck.Api.DTOs.Auth;
+using AzubiGehaltsCheck.Infrastructure.Data;
 using AzubiGehaltsCheck.Infrastructure.Identity;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
+using AzubiGehaltsCheck.Infrastructure.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.IdentityModel.Tokens;
+using Microsoft.EntityFrameworkCore;
 
-namespace AzubiGehaltsCheck.Api.Controllers;
-
-[ApiController]
-[Route("/api/auth")]
-public sealed class AuthController : ControllerBase
+namespace AzubiGehaltsCheck.Api.Controllers
 {
-    private readonly SignInManager<ApplicationUser> _signInManager;
-    private readonly UserManager<ApplicationUser> _userManager;
-    private readonly string _issuer;
-    private readonly string _audience;
-    private readonly byte[] _signingKeyBytes;
-
-    public AuthController(
-        SignInManager<ApplicationUser> signInManager,
-        UserManager<ApplicationUser> userManager,
-        IConfiguration configuration)
+    [ApiController]
+    [Route("api/[controller]")]
+    public class AuthController(UserManager<ApplicationUser> userManager, SignInManager<ApplicationUser> signInManager, IJwtTokenService jwtTokenService, ApplicationDbContext dbContext) : ControllerBase
     {
-        _signInManager = signInManager;
-        _userManager = userManager;
+        private readonly UserManager<ApplicationUser> _userManager = userManager;
+        private readonly SignInManager<ApplicationUser> _signInManager = signInManager;
+        private readonly ApplicationDbContext _dbContext = dbContext;
+        private readonly IJwtTokenService _jwtTokenService = jwtTokenService;
 
-        var jwtSettings = configuration.GetSection("Authentication:Jwt");
-        _issuer = jwtSettings["Issuer"]
-            ?? throw new InvalidOperationException("JWT issuer is not configured.");
-        _audience = jwtSettings["Audience"]
-            ?? throw new InvalidOperationException("JWT audience is not configured.");
+        // vars for refresh Token config
+        private const string RefreshTokenCookieName = "refreshToken";
+        private const string RefreshTokenProvider = "AzubiGehaltsCheck";
+        private const string RefreshTokenHashName = "RefreshTokenHash";
+        private const string RefreshTokenExpiryName = "RefreshTokenExpiryUtc";
 
-        var signingKeyBase64 = jwtSettings["SigningKey"]
-            ?? throw new InvalidOperationException("JWT signing key is not configured.");
-
-        _signingKeyBytes = Convert.FromBase64String(signingKeyBase64);
-        if (_signingKeyBytes.Length < 32)
-            throw new InvalidOperationException("JWT signing key must be at least 32 bytes.");
-    }
-
-    [AllowAnonymous]
-    [HttpPost("jwt/login")]
-    public async Task<ActionResult<LoginResponse>> Login(LoginRequest request)
-    {
-        var user = await _userManager.FindByEmailAsync(request.Email);
-        if (user is null)
-            return Unauthorized();
-
-        var result = await _signInManager.CheckPasswordSignInAsync(
-            user,
-            request.Password,
-            lockoutOnFailure: true);
-
-        if (!result.Succeeded)
-            return Unauthorized();
-
-        var roles = await _userManager.GetRolesAsync(user);
-        var now = DateTime.UtcNow;
-        var expiresAt = now.AddMinutes(15);
-
-        // creating user content for jwt token
-        var claims = new List<Claim>
+        [HttpPost("/register")]
+        public async Task<IActionResult> Register(RegisterRequest request)
         {
-            new(JwtRegisteredClaimNames.Sub, user.Id),
-            new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
-            new(ClaimTypes.Name, user.UserName ?? user.Email ?? user.Id)
-        };
+            var existingUser = await _userManager.FindByEmailAsync(request.Email);
+            if (existingUser is not null)
+            {
+                return Conflict(new ProblemDetails
+                {
+                    Title = "Email already in use.",
+                    Detail = "A user with this email already exists.",
+                    Status = StatusCodes.Status409Conflict
+                });
+            }
 
-        claims.AddRange(roles.Select(role => new Claim(ClaimTypes.Role, role)));
+            var user = new ApplicationUser
+            {
+                Email = request.Email,
+                UserName = request.Email
+            };
 
-        // creating the token with expiry time
-        var token = new JwtSecurityToken(
-            issuer: _issuer,
-            audience: _audience,
-            claims: claims,
-            notBefore: now,
-            expires: expiresAt,
-            signingCredentials: new SigningCredentials(
-                new SymmetricSecurityKey(_signingKeyBytes),
-                SecurityAlgorithms.HmacSha256));
+            var createResult = await _userManager.CreateAsync(user, request.Password);
+            if (!createResult.Succeeded)
+            {
+                var errors = createResult.Errors.Select(e => e.Description);
+                return BadRequest(new ProblemDetails
+                {
+                    Title = "Registration failed.",
+                    Detail = string.Join(" ", errors),
+                    Status = StatusCodes.Status400BadRequest
+                });
+            }
 
-        var accessToken = new JwtSecurityTokenHandler().WriteToken(token);
+            // default role from your project plan
+            var roleResult = await _userManager.AddToRoleAsync(user, "User");
+            if (!roleResult.Succeeded)
+            {
+                var errors = roleResult.Errors.Select(e => e.Description);
+                return StatusCode(StatusCodes.Status500InternalServerError, new ProblemDetails
+                {
+                    Title = "Role assignment failed.",
+                    Detail = string.Join(" ", errors),
+                    Status = StatusCodes.Status500InternalServerError
+                });
+            }
 
-        return Ok(new LoginResponse(accessToken, expiresAt));
-    }
+            return await IssueTokensAsync(user);
+        }
 
-    [Authorize(AuthenticationSchemes = JwtBearerDefaults.AuthenticationScheme)]
-    [HttpGet("jwt/me")]
-    public IActionResult GetCurrentUser()
-    {
-        return Ok(new { name = User.Identity?.Name });
+        [HttpPost("/login")]
+        public async Task<IActionResult> Login(LoginRequest request)
+        {
+            var user = await _userManager.FindByEmailAsync(request.Email);
+            // Do not reveal whether email exists (generic message)
+            if (user is null)
+            {
+                return Unauthorized(new ProblemDetails
+                {
+                    Title = "Invalid credentials.",
+                    Status = StatusCodes.Status401Unauthorized
+                });
+            }
+
+            var result = await _signInManager.CheckPasswordSignInAsync(
+                user,
+                request.Password,
+                lockoutOnFailure: true);
+
+            if (result.IsLockedOut)
+            {
+                return StatusCode(StatusCodes.Status423Locked, new ProblemDetails
+                {
+                    Title = "Account locked.",
+                    Detail = "Too many failed attempts. Try again later.",
+                    Status = StatusCodes.Status423Locked
+                });
+            }
+
+            if (!result.Succeeded)
+            {
+                return Unauthorized(new ProblemDetails
+                {
+                    Title = "Invalid credentials.",
+                    Status = StatusCodes.Status401Unauthorized
+                });
+            }
+
+            return await IssueTokensAsync(user);
+        }
+
+        [Authorize]
+        [HttpGet("/me")]
+        public IActionResult Me()
+        {
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            var email = User.FindFirstValue(ClaimTypes.Email);
+            var roles = User.FindAll(ClaimTypes.Role).Select(r => r.Value).ToArray();
+
+            return Ok(new
+            {
+                userId,
+                email,
+                roles
+            });
+        }
+
+        [HttpPost("/refresh")]
+        public async Task<IActionResult> Refresh()
+        {
+            // get cookie refresh token
+            if (!Request.Cookies.TryGetValue(RefreshTokenCookieName, out var refreshTokenPlain) || string.IsNullOrWhiteSpace(refreshTokenPlain))
+            {
+                return Unauthorized(new ProblemDetails
+                {
+                    Title = "Refresh token missing.",
+                    Status = StatusCodes.Status401Unauthorized
+                });
+            }
+
+            // Find user by stored token hash
+            var refreshTokenHash = ComputeHash(refreshTokenPlain);
+
+            var tokenRow = await _dbContext.Set<IdentityUserToken<string>>()
+                .AsNoTracking()
+                .SingleOrDefaultAsync(t =>
+                    t.LoginProvider == RefreshTokenProvider &&
+                    t.Name == RefreshTokenHashName &&
+                    t.Value == refreshTokenHash);
+
+            if (tokenRow is null)
+            {
+                return Unauthorized(new ProblemDetails
+                {
+                    Title = "Invalid refresh token.",
+                    Status = StatusCodes.Status401Unauthorized
+                });
+            }
+
+            // load user
+            var user = await _userManager.FindByIdAsync(tokenRow.UserId);
+            if (user is null)
+            {
+                return Unauthorized(new ProblemDetails
+                {
+                    Title = "Invalid refresh token.",
+                    Status = StatusCodes.Status401Unauthorized
+                });
+            }
+
+            // validate that token is expired
+            var expiryRaw = await _userManager.GetAuthenticationTokenAsync(user, RefreshTokenProvider, RefreshTokenExpiryName);
+
+            if (!DateTimeOffset.TryParse(expiryRaw, out var expiresAt) || expiresAt <= DateTimeOffset.UtcNow)
+            {
+                await ClearRefreshTokenAsync(user); // cleanup old cookie + store
+                return Unauthorized(new ProblemDetails
+                {
+                    Title = "Refresh token expired.",
+                    Status = StatusCodes.Status401Unauthorized
+                });
+            }
+
+            return await IssueTokensAsync(user);
+        }
+
+        [Authorize]
+        [HttpPost("/logout")]
+        public async Task<IActionResult> Logout()
+        {
+            var userId = _userManager.GetUserId(User); // User var is stored in claim (you have to make sure that authorize is at the endpoint so that you get the user)
+            if (string.IsNullOrWhiteSpace(userId))
+            {
+                return Unauthorized(new ProblemDetails
+                {
+                    Title = "User is not authenticated.",
+                    Status = StatusCodes.Status401Unauthorized
+                });
+            }
+
+            var user = await _userManager.FindByIdAsync(userId);
+            if (user is null)
+            {
+                return Unauthorized(new ProblemDetails
+                {
+                    Title = "User is not authenticated.",
+                    Status = StatusCodes.Status401Unauthorized
+                });
+            }
+
+            await ClearRefreshTokenAsync(user);
+
+            return NoContent();
+        }
+
+        private static string ComputeHash(string input)
+        {
+            var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(input));
+            return Convert.ToBase64String(bytes);
+        }
+        private async Task ClearRefreshTokenAsync(ApplicationUser user)
+        {
+            await _userManager.RemoveAuthenticationTokenAsync(
+                user, RefreshTokenProvider, RefreshTokenHashName);
+
+            await _userManager.RemoveAuthenticationTokenAsync(
+                user, RefreshTokenProvider, RefreshTokenExpiryName);
+
+            Response.Cookies.Delete(
+                RefreshTokenCookieName,
+                new CookieOptions
+                {
+                    HttpOnly = true,
+                    Secure = true,
+                    SameSite = SameSiteMode.Strict
+                });
+        }
+        private async Task<IActionResult> IssueTokensAsync(ApplicationUser user)
+        {
+            // create access token, create refresh token and hash it
+            var (accessToken, accessTokenExpiresAt) = await _jwtTokenService.CreateAccessTokenAsync(user);
+            var refreshTokenPlain = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
+            var refreshTokenHash = ComputeHash(refreshTokenPlain); // hash refresh Token
+            var refreshExpiresAt = DateTimeOffset.UtcNow.AddDays(7);
+
+            await _userManager.SetAuthenticationTokenAsync(user, RefreshTokenProvider, RefreshTokenHashName, refreshTokenHash);
+            await _userManager.SetAuthenticationTokenAsync(user, RefreshTokenProvider, RefreshTokenExpiryName, refreshExpiresAt.ToString("O"));
+
+            // Send plaintext refresh token as secure HttpOnly cookie
+            Response.Cookies.Append(RefreshTokenCookieName, refreshTokenPlain, new CookieOptions
+            {
+                HttpOnly = true,
+                Secure = true,                 // requires HTTPS
+                SameSite = SameSiteMode.Strict,
+                Expires = refreshExpiresAt,
+                IsEssential = true
+            });
+
+            // Return access token payload
+            var roles = await _userManager.GetRolesAsync(user);
+
+            return Ok(new
+            {
+                accessToken,
+                accessTokenExpiresAt,
+                email = user.Email,
+                roles
+            });
+        }
     }
 }
-
-public sealed class LoginRequest
-{
-    [Required]
-    [EmailAddress]
-    public string Email { get; init; } = "";
-
-    [Required]
-    public string Password { get; init; } = "";
-}
-
-public sealed record LoginResponse(string AccessToken, DateTime ExpiresAtUtc);
